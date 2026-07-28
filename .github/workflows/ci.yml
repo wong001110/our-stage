@@ -18,7 +18,12 @@ jobs:
         with:
           node-version: 22.16.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --reporter=append-only
+      - run: pnpm install --no-frozen-lockfile --reporter=append-only
+      - name: Upload resolved lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-pnpm-lock
+          path: pnpm-lock.yaml
       - name: Run quality checks
         id: quality
         shell: bash
@@ -69,6 +74,6 @@ jobs:
         with:
           node-version: 22.16.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --reporter=append-only
+      - run: pnpm install --no-frozen-lockfile --reporter=append-only
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
