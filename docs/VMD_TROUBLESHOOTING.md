@@ -1,29 +1,43 @@
 # VMD motion troubleshooting
 
-A VMD file can be structurally valid and still contain almost no visible motion.
+A VMD file can be structurally valid but still fail to animate in Our Stage if it is not attached to a Motion Track or if the runtime repeatedly reloads it while the timeline advances.
 
 ## Checks performed by Our Stage
 
 - File header and section lengths
 - Target model name stored in the VMD
 - Number of bone and morph tracks
-- Number of tracks whose position, rotation or weight actually changes
+- Number of tracks whose position, rotation or weight changes
 - Standard MMD bone compatibility with the loaded PMX
 - Missing custom bones and morphs
+- Whether the imported motion is actually attached to an actor Motion Track
 
-## Static or pose-only files
+## Low-variation files
 
-A high keyframe count does not prove that a file contains animation. Exporters sometimes write the same pose to many frames or include model-specific correction tracks.
+A high keyframe count does not by itself prove that every track changes substantially. Some exporters include repeated values, model-specific correction tracks or data that a simple heuristic does not fully characterise.
 
-Our Stage reports `STATIC_OR_POSE_ONLY_MOTION` when fewer than five bone tracks change and no morph track changes. It reports `MOSTLY_DUPLICATE_MOTION_KEYS` when fewer than ten percent of all tracks contain changing values.
+Our Stage therefore treats `LOW_VARIATION_MOTION` and `MOSTLY_DUPLICATE_MOTION_KEYS` as advisory warnings, not proof that the VMD is invalid. A successful playback in another MMD application is stronger evidence that the file contains usable motion.
 
-## Current Doodle Dance test files
+## Doodle Dance investigation
 
-The supplied files target `カズサ_V1.1` and contain many duplicate values:
+The supplied files target `カズサ_V1.1`. The parser detects large keyframe counts but relatively few materially changing standard tracks. However, the same files were confirmed to show visible movement in another MMD application.
 
-- `dance v2.vmd`: 6,581 bone keys and 2,604 morph keys, but only four bone tracks change materially and no morph weight changes.
-- `dance.vmd`: 1,539 bone keys, also with only a few changing tracks.
+This exposed two Our Stage issues:
 
-They may display a fixed pose with a small centre or arm adjustment. This is a property of the files, not evidence that the Sparkle PMX is broken.
+1. Importing a VMD added it to the asset library but did not automatically add it to the actor's empty Motion Track.
+2. Repeated timeline renders could request the same VMD load concurrently and keep returning the runtime to frame zero.
 
-Use another VMD with clear changing rotations on upper body, arms, legs and IK tracks to verify full playback.
+Both paths are now handled:
+
+- importing a VMD automatically creates the first Motion Clip when the selected actor has an empty Motion Track;
+- duplicate in-flight loads for the same VMD are deduplicated;
+- low-variation analysis remains a warning that requires preview confirmation.
+
+## Recommended test
+
+1. Import the PMX model.
+2. Import the VMD.
+3. Confirm a purple Motion Clip appears at time zero.
+4. Press Space or the Play button.
+5. Confirm the timeline playhead advances and the status shows `Motion ready`.
+6. Run Validation and treat low-variation messages as warnings rather than blocking errors.
