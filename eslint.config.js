@@ -30,6 +30,7 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-expressions': 'off',
       'react-hooks/set-state-in-effect': 'off',
       'no-unused-expressions': 'off',
       'no-useless-assignment': 'off',
