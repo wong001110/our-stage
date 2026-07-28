@@ -15,7 +15,11 @@ module.exports = {
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
-      config: { name: 'our_stage' },
+      config: {
+        name: 'our_stage',
+        authors: 'Our Stage',
+        description: 'Local-first AI-assisted MMD character director playground.',
+      },
     },
   ],
 };
