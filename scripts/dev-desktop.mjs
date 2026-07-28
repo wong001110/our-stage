@@ -12,7 +12,7 @@ const shared = {
 
 const mainContext = await context({
   ...shared,
-  entryPoints: ['apps/desktop/src/main.ts'],
+  entryPoints: ['apps/desktop/src/entry.ts'],
   outfile: 'apps/desktop/dist/main.cjs',
 });
 const preloadContext = await context({
