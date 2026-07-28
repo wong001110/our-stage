@@ -20,9 +20,31 @@ export interface ExportRequest {
   outputPath?: string;
 }
 
+export interface ExportSession {
+  jobId: string;
+  outputPath: string;
+  frameCount: number;
+  fps: number;
+}
+
+export interface ExportProgress {
+  jobId: string;
+  frameIndex: number;
+  frameCount: number;
+  ratio: number;
+}
+
 export interface ExportResult {
   outputPath: string;
   durationMs: number;
+  frameCount: number;
+}
+
+export interface AiGenerateRequest {
+  mode: 'create' | 'revise';
+  provider: 'deepseek';
+  project: OurStageProject;
+  request: string;
 }
 
 export interface PlatformAdapter {
@@ -36,7 +58,11 @@ export interface PlatformAdapter {
   getRecentProjects(): Promise<RecentProject[]>;
   setCredential(provider: string, value: string): Promise<boolean>;
   hasCredential(provider: string): Promise<boolean>;
-  exportVideo(request: ExportRequest): Promise<ExportResult>;
+  startVideoExport(request: ExportRequest): Promise<ExportSession | null>;
+  writeVideoFrame(jobId: string, frameIndex: number, bytes: Uint8Array): Promise<ExportProgress>;
+  finishVideoExport(jobId: string): Promise<ExportResult>;
+  cancelVideoExport(jobId: string): Promise<void>;
+  generateAiPatch(request: AiGenerateRequest): Promise<unknown>;
 }
 
 declare global {
