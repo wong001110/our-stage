@@ -1,53 +1,43 @@
-import { Clapperboard, FolderOpen, Sparkles } from 'lucide-react';
+import { Film, FolderOpen, Library, Save, Sparkles } from 'lucide-react';
+import { MmdViewport } from './components/MmdViewport';
 
 export function App() {
   return (
-    <main className="app-shell">
+    <main className="editor-shell">
       <header className="topbar">
         <div className="brand-mark">OS</div>
         <div>
           <h1>Our Stage</h1>
           <p>AI Character Director Playground</p>
         </div>
-        <span className="status-pill">Foundation</span>
+        <nav className="top-actions">
+          <button type="button"><FolderOpen size={16} /> Open</button>
+          <button type="button"><Save size={16} /> Save</button>
+          <button type="button" className="accent"><Sparkles size={16} /> AI Director</button>
+        </nav>
       </header>
 
-      <section className="welcome-card">
-        <div className="welcome-copy">
-          <span className="eyebrow">LOCAL-FIRST CREATIVE TOOL</span>
-          <h2>Bring a character. Direct a performance.</h2>
-          <p>
-            Import PMX characters and VMD motion assets, arrange them on a deterministic
-            timeline, then let AI propose edits you can inspect and control.
-          </p>
-          <div className="actions">
-            <button type="button" className="primary-button">
-              <FolderOpen size={18} /> New local project
-            </button>
-            <button type="button" className="secondary-button">
-              <Sparkles size={18} /> Try mock director
-            </button>
+      <div className="editor-grid">
+        <aside className="asset-panel panel">
+          <div className="panel-heading"><Library size={17} /><strong>Assets</strong></div>
+          <div className="asset-empty">
+            <Film size={24} />
+            <span>Imported models, motions, stages and audio appear here.</span>
           </div>
-        </div>
-        <div className="stage-placeholder" aria-label="Stage preview placeholder">
-          <Clapperboard size={42} />
-          <strong>Stage preview</strong>
-          <span>Three.js and MMD runtime arrive in Phase 1.</span>
-        </div>
-      </section>
+        </aside>
+        <MmdViewport />
+        <aside className="inspector-panel panel">
+          <div className="panel-heading"><strong>Inspector</strong></div>
+          <div className="property-group"><label>Actor</label><span>No actor selected</span></div>
+          <div className="property-group"><label>Render preset</label><span>Soft Our Series Stage</span></div>
+          <div className="property-group"><label>Output</label><span>720 × 1280 · 30 FPS</span></div>
+        </aside>
+      </div>
 
-      <section className="foundation-grid">
-        {[
-          ['Web editor core', 'React, TypeScript, Vite'],
-          ['Desktop shell', 'Electron with isolated preload'],
-          ['Project contract', 'Versioned schema and project patches'],
-          ['Validation-first AI', 'Mock provider before paid APIs'],
-        ].map(([title, description]) => (
-          <article key={title}>
-            <h3>{title}</h3>
-            <p>{description}</p>
-          </article>
-        ))}
+      <section className="timeline-shell panel">
+        <div className="timeline-heading"><strong>Timeline</strong><span>Timeline editing arrives in Phase 3.</span></div>
+        <div className="timeline-ruler">0s <span>3s</span><span>6s</span><span>9s</span><span>12s</span></div>
+        <div className="timeline-placeholder">Motion, expression, camera and audio tracks</div>
       </section>
     </main>
   );
