@@ -6,6 +6,10 @@ packages:
 # the exact integrity-pinned versions already committed in pnpm-lock.yaml.
 minimumReleaseAge: 0
 
+# Electron Forge currently resolves its official @electron/node-gyp helper from
+# Git. The commit is pinned by the lockfile; permit that transitive source.
+blockExoticSubdeps: false
+
 # Explicitly approve only the native/build steps required by the application
 # toolchain and Windows installer generation.
 allowBuilds:
