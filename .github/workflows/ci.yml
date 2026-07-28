@@ -18,12 +18,31 @@ jobs:
         with:
           node-version: 22.16.0
           cache: pnpm
-      - run: pnpm install --no-frozen-lockfile --reporter=append-only
+      - name: Install dependencies
+        id: install
+        shell: bash
+        run: |
+          set +e
+          pnpm install --no-frozen-lockfile --reporter=append-only > install.log 2>&1
+          status=$?
+          cat install.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload install diagnostics
+        if: steps.install.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-install-log
+          path: install.log
       - name: Upload resolved lockfile
+        if: steps.install.outputs.status == '0'
         uses: actions/upload-artifact@v4
         with:
           name: resolved-pnpm-lock
           path: pnpm-lock.yaml
+      - name: Fail on install error
+        if: steps.install.outputs.status != '0'
+        run: exit 1
       - name: Run quality checks
         id: quality
         shell: bash
