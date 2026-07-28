@@ -1,0 +1,4 @@
+import { describe, expect, it } from 'vitest';
+import { parseVmd } from '@our-stage/motion-registry';
+function fixedText(text:string,size:number){const bytes=new TextEncoder().encode(text),out=new Uint8Array(size);out.set(bytes.slice(0,size));return out}function u32(value:number){const bytes=new Uint8Array(4);new DataView(bytes.buffer).setUint32(0,value,true);return bytes}function syntheticVmd(){const parts=[fixedText('Vocaloid Motion Data 0002',30),fixedText('test',20),u32(1),fixedText('center',15),u32(30),new Uint8Array(92),u32(0),u32(0),u32(0),u32(0),u32(0)],size=parts.reduce((sum,item)=>sum+item.length,0),out=new Uint8Array(size);let offset=0;for(const part of parts){out.set(part,offset);offset+=part.length}return out}
+describe('VMD parser',()=>{it('reads a valid motion and computes duration',()=>{const analysis=parseVmd(syntheticVmd());expect(analysis.boneKeyframes).toBe(1);expect(analysis.maxFrame).toBe(30);expect(analysis.durationSeconds).toBe(1)})});
