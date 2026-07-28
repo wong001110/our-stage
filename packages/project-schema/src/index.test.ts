@@ -5,7 +5,11 @@ describe('project schema', () => {
   it('creates and parses a blank project', () => {
     const project = createBlankProject('Test Stage');
     expect(parseProject(project).metadata.name).toBe('Test Stage');
-    expect(project.tracks.map((track) => track.type)).toEqual(['camera', 'audio', 'render-effect']);
+    expect(project.tracks.map((track) => track.type)).toEqual([
+      'camera',
+      'audio',
+      'render-effect',
+    ]);
   });
 
   it('creates deterministic actor track types', () => {
@@ -13,6 +17,7 @@ describe('project schema', () => {
       'motion',
       'expression',
       'transform',
+      'bone-override',
     ]);
   });
 
