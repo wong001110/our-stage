@@ -21,6 +21,33 @@ describe('project schema', () => {
     ]);
   });
 
+  it('adds a missing Bone Override track when opening an older project', () => {
+    const project = createBlankProject('Legacy');
+    const actorId = 'actor-legacy';
+    const legacy = {
+      ...project,
+      actors: [{
+        actorId,
+        name: 'Legacy actor',
+        modelAssetId: 'model-legacy',
+        enabled: true,
+        initialTransform: {
+          position: [0, 0, 0] as [number, number, number],
+          rotationEuler: [0, 0, 0] as [number, number, number],
+          scale: [1, 1, 1] as [number, number, number],
+        },
+      }],
+      tracks: [
+        ...project.tracks,
+        ...createActorTracks(actorId).filter((track) => track.type !== 'bone-override'),
+      ],
+    };
+    const parsed = parseProject(legacy);
+    expect(parsed.tracks.some(
+      (track) => track.type === 'bone-override' && track.actorId === actorId,
+    )).toBe(true);
+  });
+
   it('rejects an invalid duration', () => {
     const project = createBlankProject();
     expect(() =>
