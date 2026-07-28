@@ -1,73 +1,90 @@
 # Our Stage
 
-**Our Stage — AI Character Director Playground** is a local-first desktop experiment for directing imported MMD characters with a deterministic timeline and AI-assisted composition.
+**Our Stage — AI Character Director Playground** is a local-first Electron tool for arranging imported PMX characters and VMD motions into short videos.
 
-Users bring their own PMX character models, VMD motions, audio, and related assets. Our Stage focuses on arranging those assets into a short performance: motion clips, expressions, actor placement, camera shots, render presets, validation, and MP4 export.
+It combines a normal editable timeline with an AI assistant that proposes structured changes. AI does not directly control Three.js objects or invent unavailable motion files.
 
-## Product principle
+## MVP workflow
 
 ```text
-Import PMX character
-+ Import VMD motions
-+ Describe the intended performance
-        ↓
-AI proposes a structured composition
-        ↓
-Deterministic timeline validates and executes it
-        ↓
-User reviews and edits
-        ↓
-Fixed-frame render exports MP4
+Import PMX character and textures
+→ Import VMD motion and optional audio
+→ Add clips manually or ask AI Director for a draft
+→ Review the structured patch
+→ Edit motion, expression, camera and timing
+→ Run compatibility validation
+→ Export fixed-frame H.264/AAC MP4 with FFmpeg
 ```
 
-AI acts as an assistant director. It does not directly generate arbitrary bone animation in the first release. All AI output must be expressed as validated project operations against assets that actually exist.
+## Included in v0.1.0
 
-## v0.1.0 scope
+- Electron desktop shell with isolated preload API
+- React + Vite creative editor
+- Three.js PMX/VMD preview
+- Motion, expression, transform, camera and audio timeline tracks
+- Local project save, autosave, recent projects and encrypted API credentials
+- VMD parser and PMX/VMD bone compatibility report
+- Mock AI Director that works offline and without fees
+- Optional DeepSeek structured patch provider
+- Natural-language draft and targeted revision modes
+- Draft, Preview and Final quality modes
+- Classic MMD, Soft Our Series and Cyan/Magenta stage presets
+- 720×1280 and 1080×1920 fixed-frame MP4 output
+- English default with core Chinese controls
 
-- Local-first Electron desktop application
-- React and Three.js web editor core
-- PMX character import
-- VMD motion import and playback
-- Motion, expression, transform, camera, and audio tracks
-- Deterministic preview and fixed-frame export
-- Local project and asset management
-- Motion compatibility and timeline validation
-- AI-generated composition drafts
-- Natural-language edits expressed as reviewable project patches
-- 720×1280 and 1080×1920 MP4 output
+## Requirements
 
-## Explicitly out of scope for v0.1.0
+- Windows 10/11 x64 for the first packaged target
+- Node.js 22.12 or newer
+- pnpm 11.17
+- FFmpeg and FFprobe available on `PATH`, or `FFMPEG_PATH` set to the executable
+- A GPU and driver capable of Chromium WebGL2
 
-- Model creation or rigging
-- Full MME `.fx` compatibility
-- Text-to-motion bone generation
-- Complex two-character contact animation
-- Video-to-motion pipeline
-- Cloud rendering, user accounts, payments, or marketplace
-- Public hosting requirements
-- 4K output
+Tested target hardware is an Intel Core i5-12500H, 16 GB RAM and NVIDIA RTX 3060 Laptop GPU.
 
-## Documentation
+## Development
 
-- [Product specification](docs/PRODUCT_SPEC.md)
-- [Technical architecture](docs/TECHNICAL_ARCHITECTURE.md)
-- [Implementation phases](docs/PHASE_PLAN.md)
-- [Project schema](docs/PROJECT_SCHEMA.md)
-- [AI director specification](docs/AI_DIRECTOR_SPEC.md)
-- [Motion validation specification](docs/MOTION_VALIDATION_SPEC.md)
-- [Security and asset policy](docs/SECURITY_AND_ASSET_POLICY.md)
-- [Development workflow](docs/DEVELOPMENT_WORKFLOW.md)
-- [ADR 0001: Web editor core with Electron shell](docs/adr/0001-web-editor-electron-shell.md)
-- [ADR 0002: Local-first architecture](docs/adr/0002-local-first.md)
+```bash
+pnpm install
+pnpm dev
+```
 
-## Repository policy
+Run the editor only:
 
-- `main` is the only source of truth.
-- Each implementation phase is developed on one temporary phase branch.
-- A phase is merged only after its acceptance checks pass.
-- The local and remote phase branches are deleted after merge.
-- Third-party PMX, VMD, textures, stages, music, generated videos, API keys, and personal project files must not be committed.
+```bash
+pnpm dev:editor
+```
 
-## Status
+Run checks:
 
-Planning and specification baseline. Implementation starts with **Phase 0 — Repository Foundation**.
+```bash
+pnpm check
+pnpm test:e2e
+```
+
+Build a Windows installer:
+
+```bash
+pnpm package:windows
+```
+
+## Local assets
+
+Third-party PMX, VMD, textures, music, stages and generated videos are ignored by Git and must not be committed. Users are responsible for checking whether each asset permits personal use, published video output, modification, attribution and commercial use.
+
+## AI cost
+
+The Mock provider is free and offline. DeepSeek is optional and uses the user's own API key, encrypted through Electron `safeStorage`. Only project structure and motion metadata are sent; PMX/VMD binaries and textures are not uploaded by default.
+
+## Known v0.1.0 limitations
+
+- One actor is the primary supported workflow.
+- Bullet/Ammo hair and skirt physics are not enabled in the current runtime build.
+- Motion blending is represented in project data, but full pose-aware crossfade tuning remains limited.
+- The Cyan/Magenta preset uses coloured stage lighting rather than full MME-compatible dual-outline rendering.
+- Complex two-character contact animation is not supported.
+- DeepSeek output still depends on provider compliance and is always schema-validated before application.
+- Browser-only export and cloud rendering are not included.
+- The project requires manual Windows/Electron/WebGL validation with user-supplied assets because those files cannot be committed.
+
+See [MVP status](docs/MVP_STATUS.md), [technical architecture](docs/TECHNICAL_ARCHITECTURE.md) and [phase plan](docs/PHASE_PLAN.md).
