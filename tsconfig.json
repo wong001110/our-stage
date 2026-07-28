@@ -16,6 +16,7 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
     "paths": {
       "@our-stage/project-schema": ["packages/project-schema/src/index.ts"],
       "@our-stage/timeline-engine": ["packages/timeline-engine/src/index.ts"],
