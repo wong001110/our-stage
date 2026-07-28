@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@our-stage/project-schema": ["packages/project-schema/src/index.ts"],
+      "@our-stage/timeline-engine": ["packages/timeline-engine/src/index.ts"],
+      "@our-stage/mmd-runtime": ["packages/mmd-runtime/src/index.ts"],
+      "@our-stage/motion-registry": ["packages/motion-registry/src/index.ts"],
+      "@our-stage/validator": ["packages/validator/src/index.ts"],
+      "@our-stage/ai-director": ["packages/ai-director/src/index.ts"],
+      "@our-stage/video-export": ["packages/video-export/src/index.ts"],
+      "@our-stage/platform-api": ["packages/platform-api/src/index.ts"],
+      "@our-stage/shared-ui": ["packages/shared-ui/src/index.ts"],
+      "@our-stage/shared": ["packages/shared/src/index.ts"]
+    },
+    "types": ["node", "vite/client"]
+  },
+  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts", "packages/**/*.tsx", "scripts/**/*.mjs", "tests/**/*.ts", "*.ts"],
+  "exclude": ["node_modules", "dist", "out", "release"]
+}
