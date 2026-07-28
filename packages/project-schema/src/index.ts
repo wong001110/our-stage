@@ -48,10 +48,12 @@ export const assetReferenceSchema = z.object({
   source: assetSourceSchema.optional(),
 });
 
+export const vector3Schema = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
+
 export const transformSchema = z.object({
-  position: z.tuple([z.number(), z.number(), z.number()]),
-  rotationEuler: z.tuple([z.number(), z.number(), z.number()]),
-  scale: z.tuple([z.number(), z.number(), z.number()]),
+  position: vector3Schema,
+  rotationEuler: vector3Schema,
+  scale: vector3Schema,
 });
 
 export const actorSchema = z.object({
@@ -114,10 +116,24 @@ export const transformClipSchema = baseClipSchema.extend({
   interpolation: z.enum(['step', 'linear', 'smooth']).default('smooth'),
 });
 
+/**
+ * A bone override clip is displayed as a keyframe marker. Its duration is kept
+ * for compatibility with the common timeline clip contract; interpolation is
+ * evaluated from this keyframe to the next keyframe with the same bone name.
+ */
+export const boneOverrideClipSchema = baseClipSchema.extend({
+  type: z.literal('bone-override'),
+  boneName: z.string().min(1),
+  rotationEulerOffset: vector3Schema,
+  positionOffset: vector3Schema.default([0, 0, 0]),
+  interpolation: z.enum(['step', 'linear', 'smooth']).default('smooth'),
+});
+
 export const timelineClipSchema = z.discriminatedUnion('type', [
   motionClipSchema,
   expressionClipSchema,
   transformClipSchema,
+  boneOverrideClipSchema,
   cameraClipSchema,
   audioClipSchema,
   renderEffectClipSchema,
@@ -148,6 +164,12 @@ export const transformTrackSchema = z.object({
   actorId: z.string().min(1),
   clips: z.array(transformClipSchema),
 });
+export const boneOverrideTrackSchema = z.object({
+  ...baseTrackShape,
+  type: z.literal('bone-override'),
+  actorId: z.string().min(1),
+  clips: z.array(boneOverrideClipSchema),
+});
 export const cameraTrackSchema = z.object({
   ...baseTrackShape,
   type: z.literal('camera'),
@@ -168,6 +190,7 @@ export const trackSchema = z.discriminatedUnion('type', [
   motionTrackSchema,
   expressionTrackSchema,
   transformTrackSchema,
+  boneOverrideTrackSchema,
   cameraTrackSchema,
   audioTrackSchema,
   renderEffectTrackSchema,
@@ -195,8 +218,11 @@ export type AssetReference = z.infer<typeof assetReferenceSchema>;
 export type Actor = z.infer<typeof actorSchema>;
 export type TimelineClip = z.infer<typeof timelineClipSchema>;
 export type MotionClip = z.infer<typeof motionClipSchema>;
+export type BoneOverrideClip = z.infer<typeof boneOverrideClipSchema>;
 export type ProjectTrack = z.infer<typeof trackSchema>;
+export type BoneOverrideTrack = z.infer<typeof boneOverrideTrackSchema>;
 export type TrackType = ProjectTrack['type'];
+export type Vector3Tuple = z.infer<typeof vector3Schema>;
 
 export function createBlankProject(name = 'Untitled Stage'): OurStageProject {
   const now = new Date().toISOString();
@@ -222,11 +248,29 @@ export function createActorTracks(actorId: string): ProjectTrack[] {
     { trackId: `motion-${actorId}`, name: 'Motion', type: 'motion', actorId, enabled: true, locked: false, clips: [] },
     { trackId: `expression-${actorId}`, name: 'Expression', type: 'expression', actorId, enabled: true, locked: false, clips: [] },
     { trackId: `transform-${actorId}`, name: 'Transform', type: 'transform', actorId, enabled: true, locked: false, clips: [] },
+    { trackId: `bone-override-${actorId}`, name: 'Bone Override', type: 'bone-override', actorId, enabled: true, locked: false, clips: [] },
   ];
 }
 
+export function ensureProjectActorTracks(project: OurStageProject): OurStageProject {
+  const tracks = [...project.tracks];
+  let changed = false;
+  for (const actor of project.actors) {
+    for (const required of createActorTracks(actor.actorId)) {
+      const exists = tracks.some((track) =>
+        'actorId' in track && track.actorId === actor.actorId && track.type === required.type,
+      );
+      if (!exists) {
+        tracks.push(required);
+        changed = true;
+      }
+    }
+  }
+  return changed ? { ...project, tracks } : project;
+}
+
 export function parseProject(input: unknown): OurStageProject {
-  return ourStageProjectSchema.parse(input);
+  return ensureProjectActorTracks(ourStageProjectSchema.parse(input));
 }
 
 export function touchProject(project: OurStageProject): OurStageProject {
