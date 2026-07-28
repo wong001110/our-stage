@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -21,36 +18,7 @@ jobs:
         with:
           node-version: 22.16.0
           cache: pnpm
-      - name: Install dependencies
-        id: install
-        shell: bash
-        run: |
-          set +e
-          pnpm install --no-frozen-lockfile --reporter=append-only > install.log 2>&1
-          status=$?
-          cat install.log
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Commit resolved lockfile
-        if: github.event_name == 'push' && steps.install.outputs.status == '0'
-        shell: bash
-        run: |
-          if ! git diff --quiet -- pnpm-lock.yaml; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add pnpm-lock.yaml
-            git commit -m "chore: refresh pnpm lockfile"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-      - name: Upload install diagnostics
-        if: steps.install.outputs.status != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pnpm-install-log
-          path: install.log
-      - name: Fail on install error
-        if: steps.install.outputs.status != '0'
-        run: exit 1
+      - run: pnpm install --frozen-lockfile --reporter=append-only
       - name: Run quality checks
         id: quality
         shell: bash
@@ -101,7 +69,7 @@ jobs:
         with:
           node-version: 22.16.0
           cache: pnpm
-      - run: pnpm install --no-frozen-lockfile --reporter=append-only
+      - run: pnpm install --frozen-lockfile --reporter=append-only
       - run: pnpm exec playwright install --with-deps chromium
       - name: Run browser smoke
         id: e2e
