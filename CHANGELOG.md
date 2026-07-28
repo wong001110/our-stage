@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Phase 9
+
+- Added per-actor Bone Override timeline tracks.
+- Added local rotation and position pose keyframes without modifying source VMD files.
+- Added Step, Linear and Smooth interpolation between bone keyframes.
+- Added common-bone-first selection, numeric pose controls and a viewport bone-axis marker.
+- Applied the same pose override evaluation to preview and deterministic video export.
+- Added undoable reset/delete operations and automatic migration for existing projects.
+- Added deterministic interpolation, migration and browser UI tests.
+
 ## 0.1.0 — 2026-07-28
 
 - Established the Electron + React + Three.js local-first architecture.
