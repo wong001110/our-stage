@@ -6,8 +6,17 @@ import {
   touchProject,
   type AssetReference,
   type OurStageProject,
+  type TimelineClip,
 } from '@our-stage/project-schema';
 import type { ImportedFileReference, RecentProject } from '@our-stage/platform-api';
+import {
+  applyProjectOperation,
+  createMotionClip,
+  invertProjectOperation,
+  operationLabel,
+  type HistoryEntry,
+  type ProjectOperation,
+} from '@our-stage/timeline-engine';
 
 interface ProjectState {
   project: OurStageProject;
@@ -15,9 +24,14 @@ interface ProjectState {
   dirty: boolean;
   selectedActorId: string | null;
   selectedAssetId: string | null;
+  selectedClipId: string | null;
   currentTime: number;
+  timelinePlaying: boolean;
+  zoom: number;
   recentProjects: RecentProject[];
   message: string | null;
+  undoStack: HistoryEntry[];
+  redoStack: HistoryEntry[];
   newProject(name?: string): void;
   openProject(): Promise<void>;
   saveProject(): Promise<void>;
@@ -28,7 +42,16 @@ interface ProjectState {
   importAudio(): Promise<AssetReference | null>;
   selectActor(actorId: string | null): void;
   selectAsset(assetId: string | null): void;
+  selectClip(clipId: string | null): void;
   setCurrentTime(time: number): void;
+  setTimelinePlaying(playing: boolean): void;
+  setZoom(zoom: number): void;
+  executeOperation(operation: ProjectOperation): void;
+  undo(): void;
+  redo(): void;
+  addSelectedAssetToTimeline(): void;
+  addCameraShot(): void;
+  addExpression(): void;
   updateProject(updater: (project: OurStageProject) => OurStageProject): void;
   clearMessage(): void;
 }
@@ -40,7 +63,7 @@ function toAsset(file: ImportedFileReference): AssetReference {
     type,
     title: file.name,
     contentHash: file.assetId,
-    sourcePath: file.sourcePath,
+    ...(file.sourcePath ? { sourcePath: file.sourcePath } : {}),
     runtimeUrl: file.path,
     sizeBytes: file.size,
     source: { licence: 'Unspecified', redistributionAllowed: false },
@@ -52,128 +75,121 @@ function mergeAsset(project: OurStageProject, asset: AssetReference): OurStagePr
   return touchProject({ ...project, assets });
 }
 
+function selectedActor(project: OurStageProject, actorId: string | null) {
+  return project.actors.find((actor) => actor.actorId === actorId) ?? project.actors[0];
+}
+
+function selectedTrackForClip(project: OurStageProject, clipId: string | null) {
+  if (!clipId) return null;
+  return project.tracks.find((track) => track.clips.some((clip) => clip.clipId === clipId)) ?? null;
+}
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   project: createBlankProject(),
   projectPath: null,
   dirty: false,
   selectedActorId: null,
   selectedAssetId: null,
+  selectedClipId: null,
   currentTime: 0,
+  timelinePlaying: false,
+  zoom: 72,
   recentProjects: [],
   message: null,
-
+  undoStack: [],
+  redoStack: [],
   newProject(name) {
-    set({
-      project: createBlankProject(name),
-      projectPath: null,
-      dirty: false,
-      selectedActorId: null,
-      selectedAssetId: null,
-      currentTime: 0,
-      message: 'Created a new local project.',
-    });
+    set({ project: createBlankProject(name), projectPath: null, dirty: false, selectedActorId: null, selectedAssetId: null, selectedClipId: null, currentTime: 0, timelinePlaying: false, undoStack: [], redoStack: [], message: 'Created a new local project.' });
   },
-
   async openProject() {
     const platform = window.ourStage;
     if (!platform) return;
     const loaded = await platform.loadProject();
     if (!loaded) return;
     const project = parseProject(loaded);
-    const resolvedAssets = await Promise.all(
-      project.assets.map(async (asset) => {
-        if (!asset.sourcePath) return asset;
-        const runtimeUrl = await platform.resolveAsset(asset.sourcePath);
-        return runtimeUrl ? { ...asset, runtimeUrl } : asset;
-      }),
-    );
+    const resolvedAssets = await Promise.all(project.assets.map(async (asset) => {
+      if (!asset.sourcePath) return asset;
+      const runtimeUrl = await platform.resolveAsset(asset.sourcePath);
+      return runtimeUrl ? { ...asset, runtimeUrl } : asset;
+    }));
     const hydrated = { ...project, assets: resolvedAssets };
-    set({
-      project: hydrated,
-      projectPath: null,
-      dirty: false,
-      selectedActorId: hydrated.actors[0]?.actorId ?? null,
-      selectedAssetId: null,
-      currentTime: 0,
-      message: `Opened ${hydrated.metadata.name}.`,
-    });
+    set({ project: hydrated, projectPath: null, dirty: false, selectedActorId: hydrated.actors[0]?.actorId ?? null, selectedAssetId: null, selectedClipId: null, currentTime: 0, timelinePlaying: false, undoStack: [], redoStack: [], message: `Opened ${hydrated.metadata.name}.` });
     await get().refreshRecent();
   },
-
   async saveProject() {
     const platform = window.ourStage;
     if (!platform) return;
     const path = await platform.saveProject(parseProject(get().project));
-    if (path) {
-      set({ projectPath: path, dirty: false, message: 'Project saved.' });
-      await get().refreshRecent();
-    }
+    if (path) { set({ projectPath: path, dirty: false, message: 'Project saved.' }); await get().refreshRecent(); }
   },
-
   async autosave() {
     const platform = window.ourStage;
     if (!platform || !get().dirty) return;
     await platform.autosaveProject(parseProject(get().project));
   },
-
-  async refreshRecent() {
-    const recentProjects = (await window.ourStage?.getRecentProjects()) ?? [];
-    set({ recentProjects });
-  },
-
+  async refreshRecent() { set({ recentProjects: (await window.ourStage?.getRecentProjects()) ?? [] }); },
   async importModel() {
-    const file = await window.ourStage?.importModel();
-    if (!file) return null;
-    const asset = toAsset(file);
-    const actorId = `actor-${crypto.randomUUID()}`;
-    const project = mergeAsset(get().project, asset);
-    const next = touchProject({
-      ...project,
-      actors: [
-        ...project.actors,
-        {
-          actorId,
-          name: asset.title.replace(/\.(pmx|pmd)$/i, ''),
-          modelAssetId: asset.assetId,
-          enabled: true,
-          initialTransform: {
-            position: [0, 0, 0],
-            rotationEuler: [0, 0, 0],
-            scale: [1, 1, 1],
-          },
-        },
-      ],
-      tracks: [...project.tracks, ...createActorTracks(actorId)],
-    });
-    set({ project: next, selectedActorId: actorId, selectedAssetId: asset.assetId, dirty: true, message: `Imported ${asset.title}.` });
-    await get().autosave();
-    return asset;
+    const file = await window.ourStage?.importModel(); if (!file) return null;
+    const asset = toAsset(file); const actorId = `actor-${crypto.randomUUID()}`; const project = mergeAsset(get().project, asset);
+    const next = touchProject({ ...project, actors: [...project.actors, { actorId, name: asset.title.replace(/\.(pmx|pmd)$/i, ''), modelAssetId: asset.assetId, enabled: true, initialTransform: { position: [0,0,0], rotationEuler: [0,0,0], scale: [1,1,1] } }], tracks: [...project.tracks, ...createActorTracks(actorId)] });
+    set({ project: next, selectedActorId: actorId, selectedAssetId: asset.assetId, dirty: true, message: `Imported ${asset.title}.` }); await get().autosave(); return asset;
   },
-
   async importMotion() {
-    const file = await window.ourStage?.importMotion();
-    if (!file) return null;
-    const asset = toAsset(file);
-    set({ project: mergeAsset(get().project, asset), selectedAssetId: asset.assetId, dirty: true, message: `Imported ${asset.title}.` });
-    await get().autosave();
-    return asset;
+    const file = await window.ourStage?.importMotion(); if (!file) return null; const asset = toAsset(file);
+    set({ project: mergeAsset(get().project, asset), selectedAssetId: asset.assetId, dirty: true, message: `Imported ${asset.title}. Select “Add selected” to place it on the timeline.` }); await get().autosave(); return asset;
   },
-
   async importAudio() {
-    const file = await window.ourStage?.importAudio();
-    if (!file) return null;
-    const asset = toAsset(file);
-    set({ project: mergeAsset(get().project, asset), selectedAssetId: asset.assetId, dirty: true, message: `Imported ${asset.title}.` });
-    await get().autosave();
-    return asset;
+    const file = await window.ourStage?.importAudio(); if (!file) return null; const asset = toAsset(file);
+    set({ project: mergeAsset(get().project, asset), selectedAssetId: asset.assetId, dirty: true, message: `Imported ${asset.title}. Select “Add selected” to place it on the timeline.` }); await get().autosave(); return asset;
   },
-
   selectActor: (selectedActorId) => set({ selectedActorId }),
   selectAsset: (selectedAssetId) => set({ selectedAssetId }),
-  setCurrentTime: (currentTime) => set({ currentTime }),
-  updateProject(updater) {
-    set((state) => ({ project: touchProject(updater(state.project)), dirty: true }));
-    void get().autosave();
+  selectClip: (selectedClipId) => set({ selectedClipId }),
+  setCurrentTime(currentTime) { set((state) => ({ currentTime: Math.min(state.project.output.durationSeconds, Math.max(0, currentTime)) })); },
+  setTimelinePlaying: (timelinePlaying) => set({ timelinePlaying }),
+  setZoom: (zoom) => set({ zoom: Math.min(160, Math.max(36, zoom)) }),
+  executeOperation(operation) {
+    const project = get().project; const inverse = invertProjectOperation(project, operation); const next = applyProjectOperation(project, operation); const entry: HistoryEntry = { undo: inverse, redo: operation, label: operationLabel(operation) };
+    set((state) => ({ project: next, dirty: true, undoStack: [...state.undoStack, entry].slice(-100), redoStack: [], message: entry.label })); void get().autosave();
   },
-  clearMessage: () => set({ message: null }),
+  undo() {
+    const entry = get().undoStack.at(-1); if (!entry) return; const project = applyProjectOperation(get().project, entry.undo);
+    set((state) => ({ project, dirty: true, undoStack: state.undoStack.slice(0,-1), redoStack: [...state.redoStack, entry], message: `Undo: ${entry.label}` }));
+  },
+  redo() {
+    const entry = get().redoStack.at(-1); if (!entry) return; const project = applyProjectOperation(get().project, entry.redo);
+    set((state) => ({ project, dirty: true, undoStack: [...state.undoStack, entry], redoStack: state.redoStack.slice(0,-1), message: `Redo: ${entry.label}` }));
+  },
+  addSelectedAssetToTimeline() {
+    const state = get(); const asset = state.project.assets.find((item) => item.assetId === state.selectedAssetId);
+    if (!asset) { set({ message: 'Select a motion or audio asset first.' }); return; }
+    if (asset.type === 'vmd-motion') {
+      const actor = selectedActor(state.project, state.selectedActorId); if (!actor) { set({ message: 'Import and select a PMX actor first.' }); return; }
+      const track = state.project.tracks.find((item) => item.type === 'motion' && item.actorId === actor.actorId); if (!track) return;
+      const maxDuration = Math.max(.1, state.project.output.durationSeconds-state.currentTime); const clip = createMotionClip(asset.assetId,state.currentTime,Math.min(4,maxDuration));
+      state.executeOperation({ type:'add_clip', trackId:track.trackId, clip }); set({ selectedClipId:clip.clipId }); return;
+    }
+    if (asset.type === 'audio') {
+      const track=state.project.tracks.find((item)=>item.type==='audio'); if(!track)return;
+      const clip:TimelineClip={type:'audio',clipId:`clip-${crypto.randomUUID()}`,audioAssetId:asset.assetId,startSeconds:state.currentTime,durationSeconds:Math.max(.1,state.project.output.durationSeconds-state.currentTime),sourceOffsetSeconds:0,volume:1,enabled:true};
+      state.executeOperation({type:'add_clip',trackId:track.trackId,clip}); set({selectedClipId:clip.clipId}); return;
+    }
+    set({message:'Only motion and audio assets can be placed directly in Phase 3.'});
+  },
+  addCameraShot() {
+    const state=get(); const track=state.project.tracks.find((item)=>item.type==='camera'); if(!track)return; const actor=selectedActor(state.project,state.selectedActorId);
+    const clip:TimelineClip={type:'camera',clipId:`clip-${crypto.randomUUID()}`,presetId:'medium',...(actor?{targetActorId:actor.actorId}:{}),interpolation:'smooth',startSeconds:state.currentTime,durationSeconds:Math.max(.1,Math.min(3,state.project.output.durationSeconds-state.currentTime)),enabled:true};
+    state.executeOperation({type:'add_clip',trackId:track.trackId,clip}); set({selectedClipId:clip.clipId});
+  },
+  addExpression() {
+    const state=get(); const actor=selectedActor(state.project,state.selectedActorId); if(!actor)return; const track=state.project.tracks.find((item)=>item.type==='expression'&&item.actorId===actor.actorId); if(!track)return;
+    const clip:TimelineClip={type:'expression',clipId:`clip-${crypto.randomUUID()}`,morphName:'笑い',weight:.8,fadeInSeconds:.15,fadeOutSeconds:.2,startSeconds:state.currentTime,durationSeconds:Math.max(.1,Math.min(2,state.project.output.durationSeconds-state.currentTime)),enabled:true};
+    state.executeOperation({type:'add_clip',trackId:track.trackId,clip}); set({selectedClipId:clip.clipId});
+  },
+  updateProject(updater){set((state)=>({project:touchProject(updater(state.project)),dirty:true}));void get().autosave();},
+  clearMessage:()=>set({message:null}),
 }));
+
+export function getSelectedClip(state: ProjectState): TimelineClip | null {
+  const track=selectedTrackForClip(state.project,state.selectedClipId); return track?.clips.find((clip)=>clip.clipId===state.selectedClipId)??null;
+}
