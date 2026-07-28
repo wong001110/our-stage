@@ -1,0 +1,82 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+out/
+build/
+release/
+.vite/
+*.tsbuildinfo
+
+# Tests and coverage
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local Our Stage data
+OurStageData/
+our-stage-data/
+local-assets/
+user-data/
+projects-local/
+exports/
+cache/
+logs/
+render-frames/
+temp-frames/
+*.ourstage.local
+
+# Third-party MMD source assets
+*.pmx
+*.pmd
+*.vmd
+*.vpd
+*.spa
+*.sph
+
+# Repository-cleared synthetic/legal fixtures may be force-added under tests/fixtures.
+!tests/fixtures/**
+
+# Generated media
+*.mp4
+*.webm
+*.mov
+*.avi
+*.mkv
+
+# Local tools and binaries
+ffmpeg.exe
+ffprobe.exe
+bin/ffmpeg*
+bin/ffprobe*
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor and OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Electron packaging
+apps/desktop/.webpack/
+apps/desktop/out/
+apps/desktop/release/
