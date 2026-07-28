@@ -95,4 +95,25 @@ jobs:
           cache: pnpm
       - run: pnpm install --no-frozen-lockfile --reporter=append-only
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - name: Run browser smoke
+        id: e2e
+        shell: bash
+        run: |
+          set +e
+          pnpm test:e2e > e2e.log 2>&1
+          status=$?
+          cat e2e.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload browser diagnostics
+        if: steps.e2e.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-diagnostics
+          path: |
+            e2e.log
+            test-results/
+            playwright-report/
+      - name: Fail on browser smoke error
+        if: steps.e2e.outputs.status != '0'
+        run: exit 1
