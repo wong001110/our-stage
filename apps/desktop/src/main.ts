@@ -4,11 +4,11 @@ import { createReadStream } from 'node:fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import type { OurStageProject } from '@our-stage/project-schema';
 import type { AiGenerateRequest, ExportProgress, ExportRequest, ExportResult, ExportSession } from '@our-stage/platform-api';
 protocol.registerSchemesAsPrivileged([{scheme:'ourstage-asset',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true}}]);
-const __dirname=path.dirname(fileURLToPath(import.meta.url));let mainWindow:BrowserWindow|null=null;const allowedAssetRoots=new Set<string>();let dataRoot='',autosavePath='',recentPath='',credentialsPath='';
+const __dirname=path.dirname(__filename);let mainWindow:BrowserWindow|null=null;const allowedAssetRoots=new Set<string>();let dataRoot='',autosavePath='',recentPath='',credentialsPath='';
 interface ExportJob{jobId:string;process:ChildProcessWithoutNullStreams;outputPath:string;frameCount:number;writtenFrames:number;startedAt:number;stderr:string;closed:Promise<{code:number|null;signal:NodeJS.Signals|null}>}const exportJobs=new Map<string,ExportJob>();
 function isInside(root:string,candidate:string){const relative=path.relative(root,candidate);return relative===''||(!relative.startsWith('..')&&!path.isAbsolute(relative))}function assetUrl(filePath:string){const resolved=path.resolve(filePath),root=path.dirname(resolved);allowedAssetRoots.add(root);const token=Buffer.from(root,'utf8').toString('base64url');return`ourstage-asset://local/${token}/${encodeURIComponent(path.basename(resolved))}`}
 async function hashFile(filePath:string):Promise<string>{return new Promise((resolve,reject)=>{const hash=createHash('sha256'),stream=createReadStream(filePath);stream.on('data',chunk=>hash.update(chunk));stream.on('end',()=>resolve(hash.digest('hex')));stream.on('error',reject)})}async function describeFile(filePath:string,type:string){const resolved=path.resolve(filePath),info=await stat(resolved);if(!info.isFile())throw new Error('Only files can be imported.');const hash=await hashFile(resolved);return{assetId:hash,name:path.basename(resolved),path:assetUrl(resolved),sourcePath:resolved,size:info.size,type}}

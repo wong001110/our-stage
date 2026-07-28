@@ -26,10 +26,24 @@ await preloadContext.rebuild();
 await mainContext.watch();
 await preloadContext.watch();
 
+async function waitForEditor(url) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      await fetch(url);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  throw new Error(`Editor dev server did not become available at ${url}.`);
+}
+
+await waitForEditor('http://localhost:5173/');
+
 const electron = spawn('electron', ['apps/desktop/dist/main.cjs'], {
   stdio: 'inherit',
   shell: true,
-  env: { ...process.env, OUR_STAGE_DEV_URL: 'http://127.0.0.1:5173' },
+  env: { ...process.env, OUR_STAGE_DEV_URL: 'http://localhost:5173' },
 });
 
 electron.on('exit', async (code) => {
