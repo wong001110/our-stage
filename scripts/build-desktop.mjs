@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 await mkdir('apps/desktop/dist', { recursive: true });
 
 await build({
-  entryPoints: ['apps/desktop/src/main.ts'],
+  entryPoints: ['apps/desktop/src/entry.ts'],
   outfile: 'apps/desktop/dist/main.cjs',
   bundle: true,
   platform: 'node',
