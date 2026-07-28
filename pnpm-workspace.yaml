@@ -5,3 +5,9 @@ packages:
 # pnpm 11 defaults to a 24-hour dependency release cooldown. Our CI installs
 # the exact integrity-pinned versions already committed in pnpm-lock.yaml.
 minimumReleaseAge: 0
+
+# Explicitly approve only the native/build steps required by the application
+# toolchain and Windows installer generation.
+allowBuilds:
+  esbuild: true
+  electron-winstaller: true
