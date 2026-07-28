@@ -1,11 +1,14 @@
 import {
   AmbientLight,
+  AxesHelper,
   Clock,
   Color,
   DirectionalLight,
+  Euler,
   GridHelper,
   Object3D,
   PerspectiveCamera,
+  Quaternion,
   Scene,
   SkinnedMesh,
   Vector3,
@@ -17,6 +20,7 @@ import { OutlineEffect } from 'three/addons/effects/OutlineEffect.js';
 import { MMDLoader } from 'three/addons/loaders/MMDLoader.js';
 
 export type RuntimeQuality = 'draft' | 'preview' | 'final';
+export type Vector3Tuple = [number, number, number];
 
 export interface MotionProbe {
   fromTime: number;
@@ -60,8 +64,13 @@ interface HelperObjectState {
 }
 
 interface BonePose {
-  position: [number, number, number];
+  position: Vector3Tuple;
   quaternion: [number, number, number, number];
+}
+
+interface BoneOverrideBase {
+  position: Vector3;
+  quaternion: Quaternion;
 }
 
 export class ThreeMmdRuntime {
@@ -72,13 +81,14 @@ export class ThreeMmdRuntime {
   private readonly effect: OutlineEffect;
   private readonly controls: OrbitControls;
   private readonly loader = new MMDLoader();
-  // Complex PMX models can require transformation-class ordered animation.
   private readonly helper = new MMDAnimationHelper({ afterglow: 0, pmxAnimation: true });
   private readonly clock = new Clock();
   private readonly listeners = new Set<RuntimeListener>();
   private readonly ambient: AmbientLight;
   private readonly key: DirectionalLight;
   private readonly fill: DirectionalLight;
+  private readonly selectedBoneMarker = new AxesHelper(1.6);
+  private readonly overrideBases = new Map<string, BoneOverrideBase>();
 
   private model: SkinnedMesh | null = null;
   private frameHandle: number | null = null;
@@ -86,6 +96,7 @@ export class ThreeMmdRuntime {
   private loadingMotionId: string | null = null;
   private loadingMotionPromise: Promise<void> | null = null;
   private fixedOutputSize: { width: number; height: number } | null = null;
+  private selectedBoneName: string | null = null;
   private state: MmdRuntimeState = {
     modelLoaded: false,
     motionLoaded: false,
@@ -98,7 +109,12 @@ export class ThreeMmdRuntime {
   };
 
   constructor(private readonly canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+    this.renderer = new WebGLRenderer({
+      canvas,
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.effect = new OutlineEffect(this.renderer, {
@@ -118,7 +134,16 @@ export class ThreeMmdRuntime {
     this.key.shadow.mapSize.set(2048, 2048);
     this.fill = new DirectionalLight('#aa9cff', 0.8);
     this.fill.position.set(-10, 9, -4);
-    this.scene.add(this.ambient, this.key, this.fill, new GridHelper(40, 40, '#554768', '#30283b'));
+
+    this.selectedBoneMarker.visible = false;
+    this.selectedBoneMarker.renderOrder = 20;
+    this.scene.add(
+      this.ambient,
+      this.key,
+      this.fill,
+      new GridHelper(40, 40, '#554768', '#30283b'),
+      this.selectedBoneMarker,
+    );
 
     this.resize();
     this.animate = this.animate.bind(this);
@@ -134,6 +159,7 @@ export class ThreeMmdRuntime {
   getState() { return this.state; }
   getCanvas() { return this.canvas; }
   getLoadedMotionId() { return this.loadedMotionId; }
+  getBoneNames() { return this.model?.skeleton.bones.map((bone) => bone.name) ?? []; }
 
   async loadModel(url: string, displayName = 'Imported PMX') {
     this.setState({ error: null, playing: false, motionProbe: null });
@@ -145,7 +171,10 @@ export class ThreeMmdRuntime {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.traverse((object) => {
-        const candidate = object as Object3D & { castShadow?: boolean; receiveShadow?: boolean };
+        const candidate = object as Object3D & {
+          castShadow?: boolean;
+          receiveShadow?: boolean;
+        };
         candidate.castShadow = true;
         candidate.receiveShadow = true;
       });
@@ -162,6 +191,7 @@ export class ThreeMmdRuntime {
         diagnostics: this.inspectModel(mesh, displayName),
         motionProbe: null,
       });
+      this.updateSelectedBoneMarker();
     } catch (error) {
       this.setState({ error: error instanceof Error ? error.message : String(error) });
       throw error;
@@ -171,7 +201,9 @@ export class ThreeMmdRuntime {
   async loadMotion(url: string, motionId = url) {
     if (!this.model) throw new Error('Load a PMX model before loading a VMD motion.');
     if (this.loadedMotionId === motionId && this.state.motionLoaded) return;
-    if (this.loadingMotionId === motionId && this.loadingMotionPromise) return this.loadingMotionPromise;
+    if (this.loadingMotionId === motionId && this.loadingMotionPromise) {
+      return this.loadingMotionPromise;
+    }
     if (this.loadingMotionPromise) await this.loadingMotionPromise.catch(() => undefined);
     if (this.loadedMotionId === motionId && this.state.motionLoaded) return;
 
@@ -197,6 +229,7 @@ export class ThreeMmdRuntime {
       );
       if (this.model !== target) return;
 
+      this.clearPoseOverrides();
       this.helper.remove(target);
       this.helper.add(target, { animation, physics: false });
       this.loadedMotionId = motionId;
@@ -241,9 +274,6 @@ export class ThreeMmdRuntime {
     const mixer = objectState?.mixer;
 
     if (mixer) {
-      // Advance through MMDAnimationHelper so its bone backup, IK, grants and
-      // PMX transformation order remain coherent. Calling mixer.setTime()
-      // outside the helper can leave the mesh frozen at the first pose.
       const delta = time - mixer.time;
       this.helper.update(delta);
     }
@@ -254,9 +284,16 @@ export class ThreeMmdRuntime {
 
   probeMotion(fromTime: number, toTime: number): MotionProbe {
     if (!this.model || !this.state.motionLoaded) {
-      return { fromTime, toTime, changedBones: 0, maxPositionDelta: 0, maxRotationDeltaRadians: 0 };
+      return {
+        fromTime,
+        toTime,
+        changedBones: 0,
+        maxPositionDelta: 0,
+        maxRotationDeltaRadians: 0,
+      };
     }
 
+    this.clearPoseOverrides();
     const originalTime = this.state.currentTime;
     this.seek(fromTime);
     const before = this.captureBonePose();
@@ -275,10 +312,10 @@ export class ThreeMmdRuntime {
       const dz = second.position[2] - first.position[2];
       const positionDelta = Math.hypot(dx, dy, dz);
       const dot = Math.min(1, Math.abs(
-        first.quaternion[0] * second.quaternion[0] +
-        first.quaternion[1] * second.quaternion[1] +
-        first.quaternion[2] * second.quaternion[2] +
-        first.quaternion[3] * second.quaternion[3]
+        first.quaternion[0] * second.quaternion[0]
+        + first.quaternion[1] * second.quaternion[1]
+        + first.quaternion[2] * second.quaternion[2]
+        + first.quaternion[3] * second.quaternion[3],
       ));
       const rotationDelta = 2 * Math.acos(dot);
       maxPositionDelta = Math.max(maxPositionDelta, positionDelta);
@@ -287,11 +324,18 @@ export class ThreeMmdRuntime {
     }
 
     this.seek(originalTime);
-    return { fromTime, toTime, changedBones, maxPositionDelta, maxRotationDeltaRadians };
+    return {
+      fromTime,
+      toTime,
+      changedBones,
+      maxPositionDelta,
+      maxRotationDeltaRadians,
+    };
   }
 
   reset() {
     this.pause();
+    this.clearPoseOverrides();
     this.getHelperObject(this.model)?.physics?.reset();
     this.seek(0);
   }
@@ -306,9 +350,9 @@ export class ThreeMmdRuntime {
   resetMorphs() { this.model?.morphTargetInfluences?.fill(0); }
 
   setActorTransform(transform: {
-    position: [number, number, number];
-    rotationEuler: [number, number, number];
-    scale: [number, number, number];
+    position: Vector3Tuple;
+    rotationEuler: Vector3Tuple;
+    scale: Vector3Tuple;
   }) {
     if (!this.model) return;
     this.model.position.set(...transform.position);
@@ -317,8 +361,73 @@ export class ThreeMmdRuntime {
     this.model.updateMatrixWorld(true);
   }
 
+  /** Restore the last unmodified VMD pose before evaluating another frame. */
+  clearPoseOverrides() {
+    if (!this.model || this.overrideBases.size === 0) {
+      this.overrideBases.clear();
+      return;
+    }
+    for (const bone of this.model.skeleton.bones) {
+      const base = this.overrideBases.get(bone.name);
+      if (!base) continue;
+      bone.position.copy(base.position);
+      bone.quaternion.copy(base.quaternion);
+    }
+    this.overrideBases.clear();
+    this.model.updateMatrixWorld(true);
+  }
+
+  /** Capture the current VMD-evaluated local pose as the additive override base. */
+  beginPoseOverrides() {
+    this.overrideBases.clear();
+    if (!this.model) return;
+    for (const bone of this.model.skeleton.bones) {
+      this.overrideBases.set(bone.name, {
+        position: bone.position.clone(),
+        quaternion: bone.quaternion.clone(),
+      });
+    }
+  }
+
+  applyBoneOverride(
+    boneName: string,
+    rotationEulerOffset: Vector3Tuple,
+    positionOffset: Vector3Tuple,
+  ): boolean {
+    if (!this.model) return false;
+    const bone = this.model.skeleton.bones.find((item) => item.name === boneName);
+    if (!bone) return false;
+    const base = this.overrideBases.get(boneName) ?? {
+      position: bone.position.clone(),
+      quaternion: bone.quaternion.clone(),
+    };
+    if (!this.overrideBases.has(boneName)) this.overrideBases.set(boneName, base);
+
+    bone.position.copy(base.position).add(new Vector3(...positionOffset));
+    const offset = new Quaternion().setFromEuler(new Euler(
+      rotationEulerOffset[0],
+      rotationEulerOffset[1],
+      rotationEulerOffset[2],
+      'XYZ',
+    ));
+    bone.quaternion.copy(base.quaternion).multiply(offset).normalize();
+    bone.updateMatrix();
+    this.model.updateMatrixWorld(true);
+    this.updateSelectedBoneMarker();
+    return true;
+  }
+
+  setSelectedBone(boneName: string | null) {
+    this.selectedBoneName = boneName;
+    this.updateSelectedBoneMarker();
+  }
+
   applyCameraPreset(presetId: string) {
-    const presets: Record<string, { position: [number, number, number]; target: [number, number, number]; fov: number }> = {
+    const presets: Record<string, {
+      position: Vector3Tuple;
+      target: Vector3Tuple;
+      fov: number;
+    }> = {
       wide: { position: [0, 12, 44], target: [0, 9, 0], fov: 40 },
       'full-body': { position: [0, 11, 31], target: [0, 9, 0], fov: 35 },
       medium: { position: [0, 13, 23], target: [0, 12, 0], fov: 32 },
@@ -335,9 +444,18 @@ export class ThreeMmdRuntime {
 
   applyRenderPreset(presetId: string) {
     const presets = {
-      'classic-mmd': { background: '#e9e6ee', ambient: 1.45, key: '#ffffff', keyIntensity: 1.9, fill: '#d8d0ff', fillIntensity: 0.35, exposure: 1 },
-      'soft-our-series': { background: '#17131f', ambient: 1.25, key: '#fff4fb', keyIntensity: 2.4, fill: '#aa9cff', fillIntensity: 0.8, exposure: 1.05 },
-      'cyan-magenta-outline': { background: '#0c1320', ambient: 1.05, key: '#ff88c7', keyIntensity: 2.25, fill: '#6ce7ff', fillIntensity: 1.4, exposure: 1.12 },
+      'classic-mmd': {
+        background: '#e9e6ee', ambient: 1.45, key: '#ffffff',
+        keyIntensity: 1.9, fill: '#d8d0ff', fillIntensity: 0.35, exposure: 1,
+      },
+      'soft-our-series': {
+        background: '#17131f', ambient: 1.25, key: '#fff4fb',
+        keyIntensity: 2.4, fill: '#aa9cff', fillIntensity: 0.8, exposure: 1.05,
+      },
+      'cyan-magenta-outline': {
+        background: '#0c1320', ambient: 1.05, key: '#ff88c7',
+        keyIntensity: 2.25, fill: '#6ce7ff', fillIntensity: 1.4, exposure: 1.12,
+      },
     } as const;
     const preset = presets[presetId as keyof typeof presets] ?? presets['soft-our-series'];
     this.scene.background = new Color(preset.background);
@@ -350,13 +468,20 @@ export class ThreeMmdRuntime {
   }
 
   setQuality(quality: RuntimeQuality) {
-    const ratio = quality === 'draft' ? 0.75 : quality === 'preview' ? 1 : Math.min(window.devicePixelRatio, 2);
+    const ratio = quality === 'draft'
+      ? 0.75
+      : quality === 'preview'
+        ? 1
+        : Math.min(window.devicePixelRatio, 2);
     this.renderer.setPixelRatio(ratio);
     this.resize(true);
   }
 
   setOutputSize(width: number, height: number) {
-    this.fixedOutputSize = { width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) };
+    this.fixedOutputSize = {
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height)),
+    };
     this.renderer.setPixelRatio(1);
     this.resize(true);
   }
@@ -368,6 +493,7 @@ export class ThreeMmdRuntime {
   }
 
   renderNow() {
+    this.updateSelectedBoneMarker();
     this.controls.update();
     this.effect.render(this.scene, this.camera);
   }
@@ -388,6 +514,7 @@ export class ThreeMmdRuntime {
       const next = this.state.currentTime + delta;
       if (this.state.duration > 0 && next >= this.state.duration) this.seek(0);
       else {
+        this.clearPoseOverrides();
         this.helper.update(delta);
         this.setState({ currentTime: next });
       }
@@ -402,6 +529,23 @@ export class ThreeMmdRuntime {
     })) ?? [];
   }
 
+  private updateSelectedBoneMarker() {
+    const bone = this.model && this.selectedBoneName
+      ? this.model.skeleton.bones.find((item) => item.name === this.selectedBoneName)
+      : null;
+    if (!bone) {
+      this.selectedBoneMarker.visible = false;
+      return;
+    }
+    const worldPosition = new Vector3();
+    const worldQuaternion = new Quaternion();
+    bone.getWorldPosition(worldPosition);
+    bone.getWorldQuaternion(worldQuaternion);
+    this.selectedBoneMarker.position.copy(worldPosition);
+    this.selectedBoneMarker.quaternion.copy(worldQuaternion);
+    this.selectedBoneMarker.visible = true;
+  }
+
   private resize(force = false) {
     const width = this.fixedOutputSize?.width ?? Math.max(1, this.canvas.clientWidth);
     const height = this.fixedOutputSize?.height ?? Math.max(1, this.canvas.clientHeight);
@@ -414,6 +558,7 @@ export class ThreeMmdRuntime {
 
   private clearModel() {
     if (!this.model) return;
+    this.clearPoseOverrides();
     this.helper.remove(this.model);
     this.scene.remove(this.model);
     this.model.traverse((object) => {
@@ -422,13 +567,18 @@ export class ThreeMmdRuntime {
         material?: { dispose: () => void } | Array<{ dispose: () => void }>;
       };
       resource.geometry?.dispose();
-      if (Array.isArray(resource.material)) resource.material.forEach((material) => material.dispose());
-      else resource.material?.dispose();
+      if (Array.isArray(resource.material)) {
+        resource.material.forEach((material) => material.dispose());
+      } else {
+        resource.material?.dispose();
+      }
     });
     this.model = null;
     this.loadedMotionId = null;
     this.loadingMotionId = null;
     this.loadingMotionPromise = null;
+    this.selectedBoneMarker.visible = false;
+    this.overrideBases.clear();
   }
 
   private frameModel(model: Object3D) {
@@ -473,7 +623,9 @@ export class ThreeMmdRuntime {
 
   private getHelperObject(model: SkinnedMesh | null) {
     if (!model) return undefined;
-    return (this.helper as unknown as { objects: WeakMap<SkinnedMesh, HelperObjectState> }).objects.get(model);
+    return (this.helper as unknown as {
+      objects: WeakMap<SkinnedMesh, HelperObjectState>;
+    }).objects.get(model);
   }
 
   private setState(patch: Partial<MmdRuntimeState>) {
@@ -486,11 +638,15 @@ export class DeterministicFrameClock {
   constructor(readonly fps: number) {
     if (!Number.isFinite(fps) || fps <= 0) throw new Error('FPS must be positive.');
   }
+
   timeAt(frameIndex: number) {
     if (!Number.isInteger(frameIndex) || frameIndex < 0) {
       throw new Error('Frame index must be a non-negative integer.');
     }
     return frameIndex / this.fps;
   }
-  frameCount(durationSeconds: number) { return Math.ceil(durationSeconds * this.fps); }
+
+  frameCount(durationSeconds: number) {
+    return Math.ceil(durationSeconds * this.fps);
+  }
 }
