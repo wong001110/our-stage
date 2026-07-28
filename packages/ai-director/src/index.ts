@@ -1,10 +1,279 @@
 import { z } from 'zod';
-import type { OurStageProject, TimelineClip } from '@our-stage/project-schema';
-import { timelineClipSchema } from '@our-stage/project-schema';
+import {
+  boneOverrideClipSchema,
+  timelineClipSchema,
+  vector3Schema,
+  type OurStageProject,
+  type TimelineClip,
+} from '@our-stage/project-schema';
 import { applyProjectOperation, type ProjectOperation } from '@our-stage/timeline-engine';
-const operationSchema=z.discriminatedUnion('type',[z.object({type:z.literal('add_clip'),trackId:z.string(),clip:timelineClipSchema}),z.object({type:z.literal('remove_clip'),trackId:z.string(),clipId:z.string()}),z.object({type:z.literal('move_clip'),trackId:z.string(),clipId:z.string(),startSeconds:z.number().nonnegative()}),z.object({type:z.literal('resize_clip'),trackId:z.string(),clipId:z.string(),durationSeconds:z.number().positive()}),z.object({type:z.literal('replace_motion'),trackId:z.string(),clipId:z.string(),motionAssetId:z.string()}),z.object({type:z.literal('set_clip_speed'),trackId:z.string(),clipId:z.string(),speed:z.number().positive().max(4)})]);
-export const projectPatchSchema=z.object({patchId:z.string(),baseProjectRevision:z.number().int().nonnegative(),summary:z.string(),operations:z.array(operationSchema).max(80),assumptions:z.array(z.string()).optional(),warnings:z.array(z.string()).optional()});
-export type ProjectPatch=z.infer<typeof projectPatchSchema>&{operations:ProjectOperation[]};export interface DirectorMotionSummary{assetId:string;title:string;durationSeconds:number;boneNames:string[];morphNames:string[];coreBonesPresent:string[]}export interface DirectorContext{motions:DirectorMotionSummary[];cameraPresets:string[];renderPresets:string[]}export interface AiDirectorProvider{createComposition(project:OurStageProject,request:string,context:DirectorContext):Promise<ProjectPatch>;reviseComposition(project:OurStageProject,request:string,context:DirectorContext):Promise<ProjectPatch>}
-function baseClip(type:TimelineClip['type'],start:number,duration:number){return{type,clipId:`clip-${crypto.randomUUID()}`,startSeconds:start,durationSeconds:duration,enabled:true}}
-export class MockAiDirectorProvider implements AiDirectorProvider{async createComposition(project:OurStageProject,request:string,context:DirectorContext):Promise<ProjectPatch>{const actor=project.actors[0],motion=context.motions[0],motionTrack=project.tracks.find(track=>track.type==='motion'&&track.actorId===actor?.actorId),cameraTrack=project.tracks.find(track=>track.type==='camera'),expressionTrack=project.tracks.find(track=>track.type==='expression'&&track.actorId===actor?.actorId),operations:ProjectOperation[]=[];if(actor&&motion&&motionTrack){const duration=Math.min(project.output.durationSeconds,Math.max(.1,motion.durationSeconds||4));operations.push({type:'add_clip',trackId:motionTrack.trackId,clip:{...baseClip('motion',0,duration),type:'motion',motionAssetId:motion.assetId,sourceOffsetSeconds:0,speed:1,loop:false,blendInSeconds:.25,blendOutSeconds:.25}})}if(cameraTrack){operations.push({type:'add_clip',trackId:cameraTrack.trackId,clip:{...baseClip('camera',0,Math.min(4,project.output.durationSeconds)),type:'camera',presetId:'full-body',...(actor?{targetActorId:actor.actorId}:{}),interpolation:'smooth'}});if(project.output.durationSeconds>4)operations.push({type:'add_clip',trackId:cameraTrack.trackId,clip:{...baseClip('camera',Math.max(0,project.output.durationSeconds-3),Math.min(3,project.output.durationSeconds)),type:'camera',presetId:'close-up',...(actor?{targetActorId:actor.actorId}:{}),interpolation:'smooth'}})}if(expressionTrack&&actor)operations.push({type:'add_clip',trackId:expressionTrack.trackId,clip:{...baseClip('expression',Math.max(0,project.output.durationSeconds-3),Math.min(2,project.output.durationSeconds)),type:'expression',morphName:'笑い',weight:.75,fadeInSeconds:.15,fadeOutSeconds:.2}});return{patchId:`patch-${crypto.randomUUID()}`,baseProjectRevision:project.revision,summary:`Mock director draft: ${request}`,operations,assumptions:['The first imported compatible motion is used as the performance base.'],warnings:motion?[]:['No VMD motion is available; only camera and expression cues were proposed.']}}async reviseComposition(project:OurStageProject,request:string):Promise<ProjectPatch>{const operations:ProjectOperation[]=[],lower=request.toLowerCase();for(const track of project.tracks)for(const clip of track.clips){if(lower.includes('slow')&&clip.type==='motion')operations.push({type:'set_clip_speed',trackId:track.trackId,clipId:clip.clipId,speed:.75});if((lower.includes('earlier')||request.includes('提前'))&&clip.type==='motion')operations.push({type:'move_clip',trackId:track.trackId,clipId:clip.clipId,startSeconds:Math.max(0,clip.startSeconds-1)})}return{patchId:`patch-${crypto.randomUUID()}`,baseProjectRevision:project.revision,summary:`Mock targeted revision: ${request}`,operations,warnings:operations.length?[]:['The mock provider could not map this instruction to a deterministic edit.']}}}
-export function parseProjectPatch(input:unknown):ProjectPatch{return projectPatchSchema.parse(input) as ProjectPatch}export function applyPatchToProject(project:OurStageProject,patch:ProjectPatch){if(patch.baseProjectRevision!==project.revision)throw new Error('The project changed after this AI request. Generate a new patch.');return patch.operations.reduce((current,operation)=>applyProjectOperation(current,operation),project)}export function describeOperation(operation:ProjectOperation){switch(operation.type){case'add_clip':return`Add ${operation.clip.type} clip at ${operation.clip.startSeconds.toFixed(2)}s`;case'remove_clip':return`Remove clip ${operation.clipId}`;case'move_clip':return`Move ${operation.clipId} to ${operation.startSeconds.toFixed(2)}s`;case'resize_clip':return`Resize ${operation.clipId} to ${operation.durationSeconds.toFixed(2)}s`;case'replace_motion':return`Replace ${operation.clipId} with motion ${operation.motionAssetId}`;case'set_clip_speed':return`Set ${operation.clipId} speed to ${operation.speed.toFixed(2)}×`;}}
+
+const operationSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('add_clip'), trackId: z.string(), clip: timelineClipSchema }),
+  z.object({ type: z.literal('remove_clip'), trackId: z.string(), clipId: z.string() }),
+  z.object({
+    type: z.literal('move_clip'),
+    trackId: z.string(),
+    clipId: z.string(),
+    startSeconds: z.number().nonnegative(),
+  }),
+  z.object({
+    type: z.literal('resize_clip'),
+    trackId: z.string(),
+    clipId: z.string(),
+    durationSeconds: z.number().positive(),
+  }),
+  z.object({
+    type: z.literal('replace_motion'),
+    trackId: z.string(),
+    clipId: z.string(),
+    motionAssetId: z.string(),
+  }),
+  z.object({
+    type: z.literal('set_clip_speed'),
+    trackId: z.string(),
+    clipId: z.string(),
+    speed: z.number().positive().max(4),
+  }),
+  z.object({
+    type: z.literal('update_bone_override'),
+    trackId: z.string(),
+    clipId: z.string(),
+    boneName: z.string().min(1),
+    rotationEulerOffset: vector3Schema,
+    positionOffset: vector3Schema,
+    interpolation: z.enum(['step', 'linear', 'smooth']),
+  }),
+  z.object({
+    type: z.literal('replace_bone_override_clips'),
+    trackId: z.string(),
+    clips: z.array(boneOverrideClipSchema),
+  }),
+]);
+
+export const projectPatchSchema = z.object({
+  patchId: z.string(),
+  baseProjectRevision: z.number().int().nonnegative(),
+  summary: z.string(),
+  operations: z.array(operationSchema).max(80),
+  assumptions: z.array(z.string()).optional(),
+  warnings: z.array(z.string()).optional(),
+});
+
+type ParsedProjectPatch = z.infer<typeof projectPatchSchema>;
+export type ProjectPatch = Omit<ParsedProjectPatch, 'operations'> & {
+  operations: ProjectOperation[];
+};
+
+export interface DirectorMotionSummary {
+  assetId: string;
+  title: string;
+  durationSeconds: number;
+  boneNames: string[];
+  morphNames: string[];
+  coreBonesPresent: string[];
+}
+
+export interface DirectorContext {
+  motions: DirectorMotionSummary[];
+  cameraPresets: string[];
+  renderPresets: string[];
+}
+
+export interface AiDirectorProvider {
+  createComposition(
+    project: OurStageProject,
+    request: string,
+    context: DirectorContext,
+  ): Promise<ProjectPatch>;
+  reviseComposition(
+    project: OurStageProject,
+    request: string,
+    context: DirectorContext,
+  ): Promise<ProjectPatch>;
+}
+
+function baseClip(type: TimelineClip['type'], start: number, duration: number) {
+  return {
+    type,
+    clipId: `clip-${crypto.randomUUID()}`,
+    startSeconds: start,
+    durationSeconds: duration,
+    enabled: true,
+  };
+}
+
+export class MockAiDirectorProvider implements AiDirectorProvider {
+  async createComposition(
+    project: OurStageProject,
+    request: string,
+    context: DirectorContext,
+  ): Promise<ProjectPatch> {
+    const actor = project.actors[0];
+    const motion = context.motions[0];
+    const motionTrack = project.tracks.find(
+      (track) => track.type === 'motion' && track.actorId === actor?.actorId,
+    );
+    const cameraTrack = project.tracks.find((track) => track.type === 'camera');
+    const expressionTrack = project.tracks.find(
+      (track) => track.type === 'expression' && track.actorId === actor?.actorId,
+    );
+    const operations: ProjectOperation[] = [];
+
+    if (actor && motion && motionTrack) {
+      const duration = Math.min(
+        project.output.durationSeconds,
+        Math.max(0.1, motion.durationSeconds || 4),
+      );
+      operations.push({
+        type: 'add_clip',
+        trackId: motionTrack.trackId,
+        clip: {
+          ...baseClip('motion', 0, duration),
+          type: 'motion',
+          motionAssetId: motion.assetId,
+          sourceOffsetSeconds: 0,
+          speed: 1,
+          loop: false,
+          blendInSeconds: 0.25,
+          blendOutSeconds: 0.25,
+        },
+      });
+    }
+
+    if (cameraTrack) {
+      operations.push({
+        type: 'add_clip',
+        trackId: cameraTrack.trackId,
+        clip: {
+          ...baseClip('camera', 0, Math.min(4, project.output.durationSeconds)),
+          type: 'camera',
+          presetId: 'full-body',
+          ...(actor ? { targetActorId: actor.actorId } : {}),
+          interpolation: 'smooth',
+        },
+      });
+      if (project.output.durationSeconds > 4) {
+        operations.push({
+          type: 'add_clip',
+          trackId: cameraTrack.trackId,
+          clip: {
+            ...baseClip(
+              'camera',
+              Math.max(0, project.output.durationSeconds - 3),
+              Math.min(3, project.output.durationSeconds),
+            ),
+            type: 'camera',
+            presetId: 'close-up',
+            ...(actor ? { targetActorId: actor.actorId } : {}),
+            interpolation: 'smooth',
+          },
+        });
+      }
+    }
+
+    if (expressionTrack && actor) {
+      operations.push({
+        type: 'add_clip',
+        trackId: expressionTrack.trackId,
+        clip: {
+          ...baseClip(
+            'expression',
+            Math.max(0, project.output.durationSeconds - 3),
+            Math.min(2, project.output.durationSeconds),
+          ),
+          type: 'expression',
+          morphName: '笑い',
+          weight: 0.75,
+          fadeInSeconds: 0.15,
+          fadeOutSeconds: 0.2,
+        },
+      });
+    }
+
+    return {
+      patchId: `patch-${crypto.randomUUID()}`,
+      baseProjectRevision: project.revision,
+      summary: `Mock director draft: ${request}`,
+      operations,
+      assumptions: ['The first imported compatible motion is used as the performance base.'],
+      warnings: motion
+        ? []
+        : ['No VMD motion is available; only camera and expression cues were proposed.'],
+    };
+  }
+
+  async reviseComposition(
+    project: OurStageProject,
+    request: string,
+    context: DirectorContext,
+  ): Promise<ProjectPatch> {
+    void context;
+    const operations: ProjectOperation[] = [];
+    const lower = request.toLowerCase();
+    for (const track of project.tracks) {
+      for (const clip of track.clips) {
+        if (lower.includes('slow') && clip.type === 'motion') {
+          operations.push({
+            type: 'set_clip_speed',
+            trackId: track.trackId,
+            clipId: clip.clipId,
+            speed: 0.75,
+          });
+        }
+        if ((lower.includes('earlier') || request.includes('提前')) && clip.type === 'motion') {
+          operations.push({
+            type: 'move_clip',
+            trackId: track.trackId,
+            clipId: clip.clipId,
+            startSeconds: Math.max(0, clip.startSeconds - 1),
+          });
+        }
+      }
+    }
+    return {
+      patchId: `patch-${crypto.randomUUID()}`,
+      baseProjectRevision: project.revision,
+      summary: `Mock targeted revision: ${request}`,
+      operations,
+      warnings: operations.length
+        ? []
+        : ['The mock provider could not map this instruction to a deterministic edit.'],
+    };
+  }
+}
+
+export function parseProjectPatch(input: unknown): ProjectPatch {
+  return projectPatchSchema.parse(input) as ProjectPatch;
+}
+
+export function applyPatchToProject(project: OurStageProject, patch: ProjectPatch) {
+  if (patch.baseProjectRevision !== project.revision) {
+    throw new Error('The project changed after this AI request. Generate a new patch.');
+  }
+  return patch.operations.reduce(
+    (current, operation) => applyProjectOperation(current, operation),
+    project,
+  );
+}
+
+export function describeOperation(operation: ProjectOperation) {
+  switch (operation.type) {
+    case 'add_clip':
+      return `Add ${operation.clip.type} clip at ${operation.clip.startSeconds.toFixed(2)}s`;
+    case 'remove_clip':
+      return `Remove clip ${operation.clipId}`;
+    case 'move_clip':
+      return `Move ${operation.clipId} to ${operation.startSeconds.toFixed(2)}s`;
+    case 'resize_clip':
+      return `Resize ${operation.clipId} to ${operation.durationSeconds.toFixed(2)}s`;
+    case 'replace_motion':
+      return `Replace ${operation.clipId} with motion ${operation.motionAssetId}`;
+    case 'set_clip_speed':
+      return `Set ${operation.clipId} speed to ${operation.speed.toFixed(2)}×`;
+    case 'update_bone_override':
+      return `Update ${operation.boneName} pose override`;
+    case 'replace_bone_override_clips':
+      return `Replace Bone Override track with ${operation.clips.length} keyframe(s)`;
+  }
+}
