@@ -121,7 +121,7 @@ export class ThreeMmdRuntime {
       });
       this.model = mesh;
       this.scene.add(mesh);
-      this.helper.add(mesh, { animation: undefined, physics: false });
+      this.helper.add(mesh, { physics: false });
       this.frameModel(mesh);
       this.setState({
         modelLoaded: true,

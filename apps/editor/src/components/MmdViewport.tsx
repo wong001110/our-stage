@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Gauge, Pause, Play, RotateCcw, Upload } from 'lucide-react';
 import { ThreeMmdRuntime, type MmdRuntimeState } from '@our-stage/mmd-runtime';
+import { useProjectStore } from '../store/projectStore';
 
 const initialState: MmdRuntimeState = {
   modelLoaded: false,
@@ -15,66 +16,120 @@ const initialState: MmdRuntimeState = {
 export function MmdViewport() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const runtimeRef = useRef<ThreeMmdRuntime | null>(null);
+  const loadedModelRef = useRef<string | null>(null);
+  const loadedMotionRef = useRef<string | null>(null);
   const [runtimeState, setRuntimeState] = useState(initialState);
   const [busy, setBusy] = useState(false);
+  const project = useProjectStore((state) => state.project);
+  const selectedActorId = useProjectStore((state) => state.selectedActorId);
+  const selectedAssetId = useProjectStore((state) => state.selectedAssetId);
+  const importModel = useProjectStore((state) => state.importModel);
+  const importMotion = useProjectStore((state) => state.importMotion);
+  const setCurrentTime = useProjectStore((state) => state.setCurrentTime);
+
+  const actor = useMemo(
+    () => project.actors.find((item) => item.actorId === selectedActorId) ?? project.actors[0],
+    [project.actors, selectedActorId],
+  );
+  const modelAsset = project.assets.find((asset) => asset.assetId === actor?.modelAssetId);
+  const selectedMotion = project.assets.find(
+    (asset) => asset.assetId === selectedAssetId && asset.type === 'vmd-motion',
+  );
+  const motionAsset = selectedMotion ?? project.assets.find((asset) => asset.type === 'vmd-motion');
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const runtime = new ThreeMmdRuntime(canvas);
     runtimeRef.current = runtime;
-    const unsubscribe = runtime.subscribe(setRuntimeState);
+    const unsubscribe = runtime.subscribe((state) => {
+      setRuntimeState(state);
+      setCurrentTime(state.currentTime);
+    });
     return () => {
       unsubscribe();
       runtime.dispose();
       runtimeRef.current = null;
     };
-  }, []);
+  }, [setCurrentTime]);
 
-  const importModel = async () => {
-    const platform = window.ourStage;
-    if (!platform) return;
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !modelAsset?.runtimeUrl || loadedModelRef.current === modelAsset.assetId) return;
+    loadedModelRef.current = modelAsset.assetId;
+    loadedMotionRef.current = null;
     setBusy(true);
-    try {
-      const file = await platform.importModel();
-      if (file) await runtimeRef.current?.loadModel(file.path, file.name);
-    } finally {
-      setBusy(false);
-    }
-  };
+    void runtime
+      .loadModel(modelAsset.runtimeUrl, modelAsset.title)
+      .catch(() => {
+        loadedModelRef.current = null;
+      })
+      .finally(() => setBusy(false));
+  }, [modelAsset?.assetId, modelAsset?.runtimeUrl, modelAsset?.title]);
 
-  const importMotion = async () => {
-    const platform = window.ourStage;
-    if (!platform) return;
-    setBusy(true);
-    try {
-      const file = await platform.importMotion();
-      if (file) await runtimeRef.current?.loadMotion(file.path);
-    } finally {
-      setBusy(false);
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (
+      !runtime ||
+      !runtimeState.modelLoaded ||
+      !motionAsset?.runtimeUrl ||
+      loadedMotionRef.current === motionAsset.assetId
+    ) {
+      return;
     }
-  };
+    loadedMotionRef.current = motionAsset.assetId;
+    setBusy(true);
+    void runtime
+      .loadMotion(motionAsset.runtimeUrl)
+      .catch(() => {
+        loadedMotionRef.current = null;
+      })
+      .finally(() => setBusy(false));
+  }, [motionAsset?.assetId, motionAsset?.runtimeUrl, runtimeState.modelLoaded]);
 
   return (
     <section className="viewport-panel">
       <div className="viewport-toolbar">
-        <button type="button" onClick={importModel} disabled={busy || !window.ourStage}>
+        <button type="button" onClick={() => void importModel()} disabled={busy}>
           <Upload size={16} /> PMX
         </button>
-        <button type="button" onClick={importMotion} disabled={busy || !runtimeState.modelLoaded || !window.ourStage}>
+        <button
+          type="button"
+          onClick={() => void importMotion()}
+          disabled={busy || !runtimeState.modelLoaded}
+        >
           <Upload size={16} /> VMD
         </button>
         <span className="toolbar-divider" />
-        <button type="button" onClick={() => (runtimeState.playing ? runtimeRef.current?.pause() : runtimeRef.current?.play())} disabled={!runtimeState.motionLoaded}>
+        <button
+          type="button"
+          onClick={() =>
+            runtimeState.playing ? runtimeRef.current?.pause() : runtimeRef.current?.play()
+          }
+          disabled={!runtimeState.motionLoaded}
+        >
           {runtimeState.playing ? <Pause size={16} /> : <Play size={16} />}
         </button>
-        <button type="button" onClick={() => runtimeRef.current?.reset()} disabled={!runtimeState.modelLoaded}>
+        <button
+          type="button"
+          onClick={() => runtimeRef.current?.reset()}
+          disabled={!runtimeState.modelLoaded}
+        >
           <RotateCcw size={16} />
         </button>
-        <span className="time-readout">{runtimeState.currentTime.toFixed(2)} / {runtimeState.duration.toFixed(2)}s</span>
+        <span className="time-readout">
+          {runtimeState.currentTime.toFixed(2)} / {runtimeState.duration.toFixed(2)}s
+        </span>
         <label className="quality-select">
           <Gauge size={15} />
-          <select defaultValue="preview" onChange={(event) => runtimeRef.current?.setQuality(event.target.value as 'draft' | 'preview' | 'final')}>
+          <select
+            defaultValue="preview"
+            onChange={(event) =>
+              runtimeRef.current?.setQuality(
+                event.target.value as 'draft' | 'preview' | 'final',
+              )
+            }
+          >
             <option value="draft">Draft</option>
             <option value="preview">Preview</option>
             <option value="final">Final</option>
@@ -103,7 +158,9 @@ export function MmdViewport() {
           <span>{runtimeState.diagnostics.bones} bones</span>
           <span>{runtimeState.diagnostics.morphTargets} morphs</span>
           <span>{runtimeState.diagnostics.materials} materials</span>
-          <span title={runtimeState.diagnostics.renderer}>{runtimeState.diagnostics.renderer}</span>
+          <span title={runtimeState.diagnostics.renderer}>
+            {runtimeState.diagnostics.renderer}
+          </span>
         </div>
       )}
     </section>
