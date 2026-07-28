@@ -1,5 +1,12 @@
-import { parseProject, type OurStageProject } from '@our-stage/project-schema';
-import type { ImportedFileReference, PlatformAdapter, RecentProject } from '@our-stage/platform-api';
+import { parseProject } from '@our-stage/project-schema';
+import type {
+  ExportProgress,
+  ExportResult,
+  ExportSession,
+  ImportedFileReference,
+  PlatformAdapter,
+  RecentProject,
+} from '@our-stage/platform-api';
 
 async function pickFile(accept: string, type: string): Promise<ImportedFileReference | null> {
   return new Promise((resolve) => {
@@ -20,6 +27,10 @@ async function pickFile(accept: string, type: string): Promise<ImportedFileRefer
     input.click();
   });
 }
+
+const desktopRequired = (): never => {
+  throw new Error('Desktop mode is required for this operation.');
+};
 
 export function createBrowserPlatformAdapter(): PlatformAdapter {
   return {
@@ -48,8 +59,10 @@ export function createBrowserPlatformAdapter(): PlatformAdapter {
     getRecentProjects: async (): Promise<RecentProject[]> => [],
     setCredential: async () => false,
     hasCredential: async () => false,
-    exportVideo: async () => {
-      throw new Error('Desktop mode is required for FFmpeg export.');
-    },
+    startVideoExport: async (): Promise<ExportSession | null> => desktopRequired(),
+    writeVideoFrame: async (): Promise<ExportProgress> => desktopRequired(),
+    finishVideoExport: async (): Promise<ExportResult> => desktopRequired(),
+    cancelVideoExport: async () => undefined,
+    generateAiPatch: async (): Promise<unknown> => desktopRequired(),
   };
 }
