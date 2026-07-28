@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createActorTracks, createBlankProject } from '@our-stage/project-schema';
 import {
   applyProjectOperation,
+  createBoneOverrideClip,
   createMotionClip,
   evaluateTimeline,
   invertProjectOperation,
@@ -48,5 +49,37 @@ describe('timeline operations', () => {
       clip,
     });
     expect(evaluateTimeline(next, 2).active[0]?.localTimeSeconds).toBe(2.5);
+  });
+
+  it('interpolates additive bone offsets between keyframes', () => {
+    let project = projectWithActor();
+    const first = createBoneOverrideClip('右腕', 0, [0, 0, 0], [0, 0, 0], 'linear');
+    const second = createBoneOverrideClip('右腕', 2, [0, 0, 1], [0, 2, 0], 'linear');
+    project = applyProjectOperation(project, {
+      type: 'add_clip',
+      trackId: 'bone-override-actor-1',
+      clip: first,
+    });
+    project = applyProjectOperation(project, {
+      type: 'add_clip',
+      trackId: 'bone-override-actor-1',
+      clip: second,
+    });
+    const evaluated = evaluateTimeline(project, 1).boneOverrides[0];
+    expect(evaluated?.boneName).toBe('右腕');
+    expect(evaluated?.rotationEulerOffset[2]).toBeCloseTo(0.5);
+    expect(evaluated?.positionOffset[1]).toBeCloseTo(1);
+  });
+
+  it('holds the final bone override after the last keyframe', () => {
+    let project = projectWithActor();
+    const keyframe = createBoneOverrideClip('頭', 1, [0.2, 0, 0]);
+    project = applyProjectOperation(project, {
+      type: 'add_clip',
+      trackId: 'bone-override-actor-1',
+      clip: keyframe,
+    });
+    expect(evaluateTimeline(project, 5).boneOverrides[0]?.rotationEulerOffset[0])
+      .toBeCloseTo(0.2);
   });
 });
