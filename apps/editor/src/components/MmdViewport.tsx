@@ -23,20 +23,28 @@ export function MmdViewport() {
   const loadedModelRef = useRef<string | null>(null);
   const [runtimeState, setRuntimeState] = useState(initialState);
   const [busy, setBusy] = useState(false);
+
   const project = useProjectStore((state) => state.project);
   const selectedActorId = useProjectStore((state) => state.selectedActorId);
+  const selectedBoneName = useProjectStore((state) => state.selectedBoneName);
+  const boneOverridePreview = useProjectStore((state) => state.boneOverridePreview);
   const currentTime = useProjectStore((state) => state.currentTime);
   const timelinePlaying = useProjectStore((state) => state.timelinePlaying);
   const importModel = useProjectStore((state) => state.importModel);
   const importMotion = useProjectStore((state) => state.importMotion);
   const setTimelinePlaying = useProjectStore((state) => state.setTimelinePlaying);
   const setCurrentTime = useProjectStore((state) => state.setCurrentTime);
+  const setAvailableBoneNames = useProjectStore((state) => state.setAvailableBoneNames);
+
   const actor = useMemo(
     () => project.actors.find((item) => item.actorId === selectedActorId) ?? project.actors[0],
     [project.actors, selectedActorId],
   );
   const modelAsset = project.assets.find((asset) => asset.assetId === actor?.modelAssetId);
-  const evaluation = useMemo(() => evaluateTimeline(project, currentTime), [project, currentTime]);
+  const evaluation = useMemo(
+    () => evaluateTimeline(project, currentTime),
+    [project, currentTime],
+  );
   const activeMotion = evaluation.active.find(
     (item) => item.track.type === 'motion' && item.track.actorId === actor?.actorId,
   );
@@ -57,6 +65,14 @@ export function MmdViewport() {
   }, []);
 
   useEffect(() => {
+    setAvailableBoneNames(runtimeState.diagnostics?.boneNames ?? []);
+  }, [runtimeState.diagnostics, setAvailableBoneNames]);
+
+  useEffect(() => {
+    runtimeRef.current?.setSelectedBone(selectedBoneName);
+  }, [selectedBoneName, runtimeState.modelLoaded]);
+
+  useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime || !modelAsset?.runtimeUrl || loadedModelRef.current === modelAsset.assetId) return;
     loadedModelRef.current = modelAsset.assetId;
@@ -70,8 +86,27 @@ export function MmdViewport() {
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime || !runtimeState.modelLoaded) return;
-    void renderProjectFrame(runtime, project, selectedActorId, currentTime).catch(() => undefined);
-  }, [project, selectedActorId, currentTime, runtimeState.modelLoaded]);
+    let cancelled = false;
+    void renderProjectFrame(runtime, project, selectedActorId, currentTime)
+      .then(() => {
+        if (cancelled || !boneOverridePreview || boneOverridePreview.actorId !== actor?.actorId) return;
+        runtime.applyBoneOverride(
+          boneOverridePreview.boneName,
+          boneOverridePreview.rotationEulerOffset,
+          boneOverridePreview.positionOffset,
+        );
+        runtime.renderNow();
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [
+    project,
+    selectedActorId,
+    currentTime,
+    runtimeState.modelLoaded,
+    boneOverridePreview,
+    actor?.actorId,
+  ]);
 
   const probeText = !runtimeState.motionProbe
     ? 'Probe: waiting'
@@ -79,5 +114,78 @@ export function MmdViewport() {
       ? `Probe: ${runtimeState.motionProbe.changedBones} bones changed`
       : 'Probe: 0 bones changed';
 
-  return <section className="viewport-panel"><div className="viewport-toolbar"><button type="button" onClick={() => void importModel()} disabled={busy}><Upload size={16} /> PMX</button><button type="button" onClick={() => void importMotion()} disabled={busy || !runtimeState.modelLoaded}><Upload size={16} /> VMD</button><span className="toolbar-divider" /><button type="button" onClick={() => setTimelinePlaying(!timelinePlaying)} disabled={!runtimeState.motionLoaded && !activeMotion}>{timelinePlaying ? <Pause size={16} /> : <Play size={16} />}</button><button type="button" onClick={() => { setTimelinePlaying(false); setCurrentTime(0); }} disabled={!runtimeState.modelLoaded}><RotateCcw size={16} /></button><span className="time-readout">{currentTime.toFixed(2)} / {project.output.durationSeconds.toFixed(2)}s</span><label className="quality-select"><Gauge size={15} /><select defaultValue="preview" onChange={(event) => runtimeRef.current?.setQuality(event.target.value as 'draft' | 'preview' | 'final')}><option value="draft">Draft</option><option value="preview">Preview</option><option value="final">Final</option></select></label></div><div className="viewport-canvas-wrap"><canvas ref={canvasRef} />{!runtimeState.modelLoaded && <div className="viewport-empty"><Camera size={38} /><strong>Import a PMX model</strong><span>Desktop mode resolves the model and relative texture files locally.</span></div>}{runtimeState.error && <div className="viewport-error">{runtimeState.error}</div>}</div><div className="viewport-status"><span>{runtimeState.modelLoaded ? 'Model ready' : 'No model'}</span><span>{runtimeState.motionLoaded ? 'Motion ready' : 'No motion'}</span><span>{activeMotion ? `Timeline: ${activeMotion.clip.label ?? 'motion'}` : 'Timeline idle'}</span><span>{probeText}</span></div>{runtimeState.diagnostics && <div className="diagnostic-strip"><strong>{runtimeState.diagnostics.name}</strong><span>{runtimeState.diagnostics.bones} bones</span><span>{runtimeState.diagnostics.morphTargets} morphs</span><span>{runtimeState.diagnostics.materials} materials</span><span title={runtimeState.diagnostics.renderer}>{runtimeState.diagnostics.renderer}</span></div>}</section>;
+  return (
+    <section className="viewport-panel">
+      <div className="viewport-toolbar">
+        <button type="button" onClick={() => void importModel()} disabled={busy}>
+          <Upload size={16} /> PMX
+        </button>
+        <button
+          type="button"
+          onClick={() => void importMotion()}
+          disabled={busy || !runtimeState.modelLoaded}
+        >
+          <Upload size={16} /> VMD
+        </button>
+        <span className="toolbar-divider" />
+        <button
+          type="button"
+          onClick={() => setTimelinePlaying(!timelinePlaying)}
+          disabled={!runtimeState.motionLoaded && !activeMotion}
+        >
+          {timelinePlaying ? <Pause size={16} /> : <Play size={16} />}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setTimelinePlaying(false); setCurrentTime(0); }}
+          disabled={!runtimeState.modelLoaded}
+        >
+          <RotateCcw size={16} />
+        </button>
+        <span className="time-readout">
+          {currentTime.toFixed(2)} / {project.output.durationSeconds.toFixed(2)}s
+        </span>
+        <label className="quality-select">
+          <Gauge size={15} />
+          <select
+            defaultValue="preview"
+            onChange={(event) => runtimeRef.current?.setQuality(
+              event.target.value as 'draft' | 'preview' | 'final',
+            )}
+          >
+            <option value="draft">Draft</option>
+            <option value="preview">Preview</option>
+            <option value="final">Final</option>
+          </select>
+        </label>
+      </div>
+      <div className="viewport-canvas-wrap">
+        <canvas ref={canvasRef} />
+        {!runtimeState.modelLoaded && (
+          <div className="viewport-empty">
+            <Camera size={38} />
+            <strong>Import a PMX model</strong>
+            <span>Desktop mode resolves the model and relative texture files locally.</span>
+          </div>
+        )}
+        {runtimeState.error && <div className="viewport-error">{runtimeState.error}</div>}
+      </div>
+      <div className="viewport-status">
+        <span>{runtimeState.modelLoaded ? 'Model ready' : 'No model'}</span>
+        <span>{runtimeState.motionLoaded ? 'Motion ready' : 'No motion'}</span>
+        <span>{activeMotion ? `Timeline: ${activeMotion.clip.label ?? 'motion'}` : 'Timeline idle'}</span>
+        <span>{probeText}</span>
+        <span>{selectedBoneName ? `Bone: ${selectedBoneName}` : 'No bone selected'}</span>
+      </div>
+      {runtimeState.diagnostics && (
+        <div className="diagnostic-strip">
+          <strong>{runtimeState.diagnostics.name}</strong>
+          <span>{runtimeState.diagnostics.bones} bones</span>
+          <span>{runtimeState.diagnostics.morphTargets} morphs</span>
+          <span>{runtimeState.diagnostics.materials} materials</span>
+          <span title={runtimeState.diagnostics.renderer}>{runtimeState.diagnostics.renderer}</span>
+        </div>
+      )}
+    </section>
+  );
 }
