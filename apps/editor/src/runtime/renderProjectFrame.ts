@@ -23,18 +23,18 @@ export async function renderProjectFrame(
   const motionEntry = evaluation.active.find(
     (item) => item.track.type === 'motion' && item.track.actorId === actor.actorId,
   );
+  const motionClip = motionEntry?.clip.type === 'motion' ? motionEntry.clip : null;
 
-  if (motionEntry?.clip.type === 'motion') {
-    const asset = project.assets.find((item) => item.assetId === motionEntry.clip.motionAssetId);
+  if (motionEntry && motionClip) {
+    const asset = project.assets.find((item) => item.assetId === motionClip.motionAssetId);
     if (asset?.runtimeUrl) {
       if (runtime.getLoadedMotionId() !== asset.assetId) {
         await runtime.loadMotion(asset.runtimeUrl, asset.assetId);
       }
       const duration = runtime.getState().duration;
-      const localTime =
-        motionEntry.clip.loop && duration > 0
-          ? motionEntry.localTimeSeconds % duration
-          : motionEntry.localTimeSeconds;
+      const localTime = motionClip.loop && duration > 0
+        ? motionEntry.localTimeSeconds % duration
+        : motionEntry.localTimeSeconds;
       runtime.seek(localTime);
     }
   } else if (runtime.getState().motionLoaded) {
